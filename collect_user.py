@@ -10,13 +10,32 @@ HDR = lambda token: {"ApiToken": token, "User-Agent": "Mozilla/5.0", "Content-Ty
 TOKENS = [t.strip() for t in os.environ.get("CSQAQ_TOKENS", "").split(",") if t.strip()]
 
 
+def bind_with_retry(token, max_retries=3):
+    """bind_local_ip，429频率限制时等待30s重试"""
+    for attempt in range(max_retries + 1):
+        r = requests.post(f"{API}/api/v1/sys/bind_local_ip", headers=HDR(token)).json()
+        code = r.get("code")
+        if code == 200:
+            return r
+        if code == 429:
+            if attempt < max_retries:
+                print(f"  bind 429频率限制, 30s后重试 ({attempt+1}/{max_retries})...")
+                time.sleep(30)
+                continue
+            else:
+                print(f"  bind 429频率限制, 已达最大重试次数")
+                return r
+        return r
+    return r
+
+
 def collect_user_trade(user_id, token):
     """采集单个用户的交易记录"""
     print(f"采集用户交易: user_id={user_id}, token={token[:8]}...")
 
     # 1. bind
     print("[1/3] bind...")
-    bind_r = requests.post(f"{API}/api/v1/sys/bind_local_ip", headers=HDR(token)).json()
+    bind_r = bind_with_retry(token)
     print(f"  bind: code={bind_r.get('code')}")
     if bind_r.get("code") != 200:
         return {"user_id": user_id, "error": "bind_failed", "detail": bind_r.get("msg", "")}
@@ -75,7 +94,7 @@ def collect_user_inventory(user_id, token):
 
     # 1. bind
     print("[1/2] bind...")
-    bind_r = requests.post(f"{API}/api/v1/sys/bind_local_ip", headers=HDR(token)).json()
+    bind_r = bind_with_retry(token)
     print(f"  bind: code={bind_r.get('code')}")
     if bind_r.get("code") != 200:
         return {"user_id": user_id, "error": "bind_failed", "detail": bind_r.get("msg", "")}
