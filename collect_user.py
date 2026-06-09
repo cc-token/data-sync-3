@@ -52,8 +52,13 @@ def collect_user_trade(user_id, token):
 
     # 2. get_task_info - 获取用户监控任务信息
     print("[2/3] get_task_info...")
-    info_r = requests.post(f"{API}/api/v1/task/get_task_info",
-                           headers=HDR(token), json={"task_id": str(user_id)}, timeout=30).json()
+    try:
+        info_r = requests.post(f"{API}/api/v1/task/get_task_info",
+                               headers=HDR(token), json={"task_id": str(user_id)}, timeout=30).json()
+    except requests.exceptions.RequestException as e:
+        return {"user_id": user_id, "error": "get_task_info_failed", "detail": f"网络错误: {type(e).__name__}"}
+    except Exception as e:
+        return {"user_id": user_id, "error": "get_task_info_failed", "detail": f"{type(e).__name__}: {e}"}
     if info_r.get("code") != 200:
         return {"user_id": user_id, "error": "get_task_info_failed", "detail": info_r.get("msg", "")}
 
@@ -72,10 +77,21 @@ def collect_user_trade(user_id, token):
     total_pages = 1
 
     while page <= total_pages:
-        trade_r = requests.post(f"{API}/api/v1/task/get_task_business",
-                                headers=HDR(token),
-                                json={"task_id": str(user_id), "page_index": page,
-                                      "page_size": 50, "type": "ALL"}, timeout=30).json()
+        try:
+            trade_r = requests.post(f"{API}/api/v1/task/get_task_business",
+                                    headers=HDR(token),
+                                    json={"task_id": str(user_id), "page_index": page,
+                                          "page_size": 50, "type": "ALL"}, timeout=30).json()
+        except requests.exceptions.RequestException as e:
+            if page == 1:
+                return {"user_id": user_id, "error": "get_task_business_failed",
+                        "detail": f"网络错误: {type(e).__name__}"}
+            break
+        except Exception as e:
+            if page == 1:
+                return {"user_id": user_id, "error": "get_task_business_failed",
+                        "detail": f"{type(e).__name__}: {e}"}
+            break
         if trade_r.get("code") != 200:
             if page == 1:
                 return {"user_id": user_id, "error": "get_task_business_failed",
@@ -125,8 +141,13 @@ def collect_user_inventory(user_id, token):
 
     # 2. get_task_info - 包含库存信息
     print("[2/2] get_task_info...")
-    info_r = requests.post(f"{API}/api/v1/task/get_task_info",
-                           headers=HDR(token), json={"task_id": str(user_id)}, timeout=30).json()
+    try:
+        info_r = requests.post(f"{API}/api/v1/task/get_task_info",
+                               headers=HDR(token), json={"task_id": str(user_id)}, timeout=30).json()
+    except requests.exceptions.RequestException as e:
+        return {"user_id": user_id, "error": "get_task_info_failed", "detail": f"网络错误: {type(e).__name__}"}
+    except Exception as e:
+        return {"user_id": user_id, "error": "get_task_info_failed", "detail": f"{type(e).__name__}: {e}"}
     if info_r.get("code") != 200:
         return {"user_id": user_id, "error": "get_task_info_failed", "detail": info_r.get("msg", "")}
 
