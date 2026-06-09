@@ -13,7 +13,17 @@ TOKENS = [t.strip() for t in os.environ.get("CSQAQ_TOKENS", "").split(",") if t.
 def bind_with_retry(token, max_retries=3):
     """bind_local_ip，429频率限制时等待30s重试"""
     for attempt in range(max_retries + 1):
-        r = requests.post(f"{API}/api/v1/sys/bind_local_ip", headers=HDR(token)).json()
+        try:
+            r = requests.post(f"{API}/api/v1/sys/bind_local_ip", headers=HDR(token), timeout=30).json()
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+            if attempt < max_retries:
+                print(f"  bind 网络错误({type(e).__name__}), 10s后重试 ({attempt+1}/{max_retries})...")
+                time.sleep(10)
+                continue
+            print(f"  bind 网络错误({type(e).__name__}), 已达最大重试次数")
+            return {"code": -1, "msg": str(e)}
+        except Exception as e:
+            return {"code": -1, "msg": str(e)}
         code = r.get("code")
         if code == 200:
             return r
@@ -22,9 +32,8 @@ def bind_with_retry(token, max_retries=3):
                 print(f"  bind 429频率限制, 30s后重试 ({attempt+1}/{max_retries})...")
                 time.sleep(30)
                 continue
-            else:
-                print(f"  bind 429频率限制, 已达最大重试次数")
-                return r
+            print(f"  bind 429频率限制, 已达最大重试次数")
+            return r
         return r
     return r
 
@@ -44,11 +53,16 @@ def collect_user_trade(user_id, token):
     # 2. get_task_info - 获取用户监控任务信息
     print("[2/3] get_task_info...")
     info_r = requests.post(f"{API}/api/v1/task/get_task_info",
-                           headers=HDR(token), json={"task_id": str(user_id)}).json()
+                           headers=HDR(token), json={"task_id": str(user_id)}, timeout=30).json()
     if info_r.get("code") != 200:
         return {"user_id": user_id, "error": "get_task_info_failed", "detail": info_r.get("msg", "")}
 
     task_info = info_r.get("data", {})
+    # API 返回用户信息在 data.info 列表中，提取第一个元素
+    if isinstance(task_info, dict) and "info" in task_info:
+        info_list = task_info.get("info", [])
+        if isinstance(info_list, list) and info_list:
+            task_info = info_list[0]
     time.sleep(1.1)
 
     # 3. get_task_business - 获取交易记录（分页）
@@ -61,7 +75,7 @@ def collect_user_trade(user_id, token):
         trade_r = requests.post(f"{API}/api/v1/task/get_task_business",
                                 headers=HDR(token),
                                 json={"task_id": str(user_id), "page_index": page,
-                                      "page_size": 50, "type": "ALL"}).json()
+                                      "page_size": 50, "type": "ALL"}, timeout=30).json()
         if trade_r.get("code") != 200:
             if page == 1:
                 return {"user_id": user_id, "error": "get_task_business_failed",
@@ -69,11 +83,20 @@ def collect_user_trade(user_id, token):
             break
 
         trade_data = trade_r.get("data", {})
-        items = trade_data.get("data", [])
+        # API 返回交易数据在 trades 字段，不是 data 字段
+        items = trade_data.get("trades", [])
         all_trades.extend(items)
 
         total_count = trade_data.get("total", 0)
         total_pages = max(1, (total_count + 49) // 50)
+
+        # 软封锁检测：API 返回 total > 0 但 trades 为空
+        if total_count > 0 and len(items) == 0 and page == 1:
+            print(f"  [软封锁] total={total_count} 但 trades 为空，同一 Token 同 IP 重复采集被限流")
+            return {"user_id": user_id, "error": "api_soft_block",
+                    "detail": f"total={total_count} but trades empty, possible rate limit for token+IP",
+                    "task_info": task_info}
+
         print(f"  page {page}/{total_pages}, got {len(items)} trades")
         page += 1
         if page <= total_pages:
@@ -103,11 +126,16 @@ def collect_user_inventory(user_id, token):
     # 2. get_task_info - 包含库存信息
     print("[2/2] get_task_info...")
     info_r = requests.post(f"{API}/api/v1/task/get_task_info",
-                           headers=HDR(token), json={"task_id": str(user_id)}).json()
+                           headers=HDR(token), json={"task_id": str(user_id)}, timeout=30).json()
     if info_r.get("code") != 200:
         return {"user_id": user_id, "error": "get_task_info_failed", "detail": info_r.get("msg", "")}
 
     task_info = info_r.get("data", {})
+    # API 返回用户信息在 data.info 列表中，提取第一个元素
+    if isinstance(task_info, dict) and "info" in task_info:
+        info_list = task_info.get("info", [])
+        if isinstance(info_list, list) and info_list:
+            task_info = info_list[0]
 
     return {
         "user_id": user_id,
